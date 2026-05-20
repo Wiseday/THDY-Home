@@ -1,8 +1,5 @@
 // THDY Family App - FCM/Web Push Service Worker
-// This file intentionally does NOT import the Firebase SDK.
-// Some mobile browsers can fail to evaluate Firebase compat scripts inside a service worker.
-// The page registers this service worker and Firebase getToken() uses the registration.
-// Incoming FCM Web Push payloads are handled through the standard push event.
+// No Firebase SDK import: handles standard push events directly for mobile browser stability.
 
 self.addEventListener("install", function(event) {
   self.skipWaiting();
@@ -12,22 +9,32 @@ self.addEventListener("activate", function(event) {
   event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("push", function(event) {
-  let payload = {};
-
+function pickPayload(event) {
+  if (!event.data) return {};
   try {
-    payload = event.data ? event.data.json() : {};
+    return event.data.json();
   } catch (error) {
-    payload = {
-      notification: {
+    return {
+      data: {
         title: "THDY 가족앱",
-        body: event.data ? event.data.text() : "새 알림이 도착했습니다."
+        body: event.data.text() || "새 알림이 도착했습니다."
       }
     };
   }
+}
 
-  const notification = payload.notification || {};
-  const data = payload.data || {};
+self.addEventListener("push", function(event) {
+  const payload = pickPayload(event);
+
+  const notification =
+    payload.notification ||
+    payload.webpush?.notification ||
+    {};
+
+  const data =
+    payload.data ||
+    notification.data ||
+    {};
 
   const title =
     notification.title ||
@@ -39,15 +46,21 @@ self.addEventListener("push", function(event) {
     data.body ||
     "새 알림이 도착했습니다.";
 
+  const link =
+    data.link ||
+    payload.fcmOptions?.link ||
+    payload.fcm_options?.link ||
+    "./";
+
   const options = {
-    body: body,
+    body,
     icon: notification.icon || data.icon || "./icons/icon-192.png",
     badge: notification.badge || data.badge || "./icons/icon-192.png",
     data: {
       ...data,
-      link: data.link || payload.fcmOptions?.link || "./"
+      link
     },
-    requireInteraction: false
+    requireInteraction: notification.requireInteraction === true
   };
 
   event.waitUntil(
@@ -68,7 +81,7 @@ self.addEventListener("notificationclick", function(event) {
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function(clientList) {
       for (const client of clientList) {
-        if (client.url && "focus" in client) {
+        if ("focus" in client) {
           return client.focus();
         }
       }
